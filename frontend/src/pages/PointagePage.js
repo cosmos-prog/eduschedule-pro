@@ -313,26 +313,35 @@ const PointagePage = () => {
           </>
         )}
 
-        {/* Saisie manuelle */}
-        {!scanResult && !loadingInfo && !seanceInfo && (saisieManuelle || !urlToken) && (
+        {/* Saisie manuelle — toujours visible si pas de résultat */}
+        {!scanResult && !loadingInfo && !seanceInfo && (
           <Card className="shadow-sm border-0">
             <Card.Body className="p-4">
-              <h6 className="mb-3">
-                <FaKeyboard className="me-2 text-primary" />
-                Saisir le code manuellement
+              <h6 className="mb-1 text-primary">
+                <FaKeyboard className="me-2" />
+                Saisir le code de la séance
               </h6>
+              <p className="text-muted small mb-3">
+                Copiez le code affiché sous le QR-Code sur le PC de l'admin/surveillant
+              </p>
               <Form.Control
-                type="text"
-                placeholder="Coller le token du QR-Code ici..."
+                as="textarea"
+                rows={3}
+                placeholder="Collez le code ici..."
                 value={tokenInput}
                 onChange={e => setTokenInput(e.target.value)}
-                className="mb-3"
+                className="mb-3 font-monospace"
+                style={{ fontSize: '0.75rem' }}
               />
               <div className="d-grid">
-                <Button variant="primary"
-                  onClick={() => fetchSeanceInfo(tokenInput)}
-                  disabled={!tokenInput || loadingInfo}>
-                  Vérifier le code
+                <Button
+                  variant="primary"
+                  size="lg"
+                  onClick={() => fetchSeanceInfo(tokenInput.trim())}
+                  disabled={!tokenInput.trim() || loadingInfo}
+                >
+                  <FaCheckCircle className="me-2" />
+                  Vérifier et afficher la séance
                 </Button>
               </div>
             </Card.Body>
@@ -407,8 +416,26 @@ const PointagePage = () => {
                         <FaClock className="me-1" />
                         Expire : {new Date(qrData.expire).toLocaleTimeString('fr-FR')}
                       </Badge>
-                      <div className="mt-2">
-                        <small className="text-muted">{qrData.scan_url}</small>
+
+                      {/* Code court pour saisie manuelle sur téléphone */}
+                      <div className="mt-3 p-3 bg-light rounded border">
+                        <div className="small text-muted mb-1">
+                          <FaKeyboard className="me-1" />
+                          Code à saisir manuellement sur le téléphone :
+                        </div>
+                        <div
+                          className="fw-bold text-primary"
+                          style={{ fontSize: '1rem', wordBreak: 'break-all', cursor: 'pointer' }}
+                          onClick={() => {
+                            navigator.clipboard?.writeText(qrData.token);
+                          }}
+                          title="Cliquer pour copier"
+                        >
+                          {qrData.token?.substring(0, 40)}...
+                        </div>
+                        <div className="small text-muted mt-1">
+                          Sur le téléphone → "Saisir un code manuellement" → coller ce code
+                        </div>
                       </div>
                     </div>
                   </div>
