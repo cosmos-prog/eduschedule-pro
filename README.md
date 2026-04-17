@@ -142,4 +142,8 @@ Pour tester le pointage QR depuis un smartphone :
 
 ## Auteurs
 
-Groupe EduSchedule Pro — ISGE-BF, Année Universitaire 2025-2026
+- **TRAORE Abd-Ar-Rahim Ada Christ Rayan**
+- **DOUSSA Oceane Benedicte**
+- **TA-ASNAN Succes**
+
+ISGE-BF — Année Universitaire 2025-2026
