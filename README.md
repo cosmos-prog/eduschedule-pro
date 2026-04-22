@@ -143,15 +143,20 @@ Le projet utilise deux fichiers d'environnement séparés :
 
 ## Comptes de démonstration
 
-| Rôle        | Email                       | Mot de passe |
-|-------------|-----------------------------|--------------|
-| Admin       | admin@eduschedule.pro       | password     |
-| Enseignant  | cedric.bere@isge.edu        | password     |
-| Enseignant  | aminata.ouedraogo@isge.edu  | password     |
-| Délégué L1  | delegue.l1@isge.edu         | password     |
-| Délégué L2  | delegue.l2@isge.edu         | password     |
-| Surveillant | surveillant@isge.edu        | password     |
-| Comptable   | comptable@isge.edu          | password     |
+| Rôle        | Email                          | Mot de passe |
+|-------------|--------------------------------|--------------|
+| Admin       | admin@eduschedule.pro          | password     |
+| Enseignant  | cedric.bere@isge.edu           | password     |
+| Enseignant  | aminata.ouedraogo@isge.edu     | password     |
+| Enseignant  | ibrahim.kabore@isge.edu        | password     |
+| Enseignant  | moussa.traore@isge.edu         | password     |
+| Enseignant  | marie.sanou@isge.edu           | password     |
+| Enseignant  | patricia.zongo@isge.edu        | password     |
+| Délégué L1  | delegue.l1@isge.edu            | password     |
+| Délégué L2  | delegue.l2@isge.edu            | password     |
+| Délégué L3  | delegue.l3@isge.edu            | password     |
+| Surveillant | surveillant@isge.edu           | password     |
+| Comptable   | comptable@isge.edu             | password     |
 
 ---
 

@@ -194,13 +194,16 @@ function handleScanQR(PDO $db): void {
     // Déterminer le statut : retard si > 0 sec après l'heure prévue
     $statut = ($diff > 0) ? 'retard' : 'valide';
 
-    // Enregistrer le pointage
+    // Enregistrer le pointage — PHP date() respecte date_default_timezone_set('Africa/Ouagadougou')
+    // MySQL NOW() utilise le fuseau du serveur MySQL (UTC sur InfinityFree) → heure incorrecte
+    $heurePointage = date('Y-m-d H:i:s');
     $stmtPointage = $db->prepare("
         INSERT INTO pointages (id_creneau, heure_pointage_reelle, ip_source, token_utilise, statut)
-        VALUES (?, NOW(), ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
     ");
     $stmtPointage->execute([
         $idCreneau,
+        $heurePointage,
         $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
         $token,
         $statut
@@ -465,12 +468,14 @@ function getAlertesRetard(PDO $db): void {
  * Logger une tentative de pointage
  */
 function logPointage(PDO $db, ?int $idCreneau, string $token, string $statut): void {
+    // PHP date() respecte date_default_timezone_set — MySQL NOW() non
+    $heurePointage = date('Y-m-d H:i:s');
     $stmt = $db->prepare("
         INSERT INTO pointages (id_creneau, heure_pointage_reelle, ip_source, token_utilise, statut)
-        VALUES (?, NOW(), ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
     ");
     // Ne logger que si on a un créneau valide
     if ($idCreneau) {
-        $stmt->execute([$idCreneau, $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1', $token, $statut]);
+        $stmt->execute([$idCreneau, $heurePointage, $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1', $token, $statut]);
     }
 }
