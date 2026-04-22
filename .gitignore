@@ -1,5 +1,20 @@
-node_modules/ 
-frontend/build/ 
-backend/.env 
-frontend/.env 
-*.log 
+# Dépendances
+node_modules/
+
+# Build React (généré par npm run build)
+frontend/build/
+
+# Fichiers d'environnement sensibles (credentials)
+backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.production.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Divers
+.DS_Store
+Thumbs.db

@@ -4,12 +4,12 @@
  */
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Card, Form, Button, Spinner, Table, Badge } from 'react-bootstrap';
-import { FaChartBar, FaFilePdf, FaDownload } from 'react-icons/fa';
+import { FaChartBar, FaDownload } from 'react-icons/fa';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart, Pie, Cell, ResponsiveContainer
 } from 'recharts';
-import { dashboardService, classesService } from '../utils/api';
+import { dashboardService } from '../utils/api';
 import { useNotif } from '../context/NotifContext';
 
 const COLORS = ['#1a5276', '#27ae60', '#e67e22', '#e74c3c', '#8e44ad', '#3498db'];

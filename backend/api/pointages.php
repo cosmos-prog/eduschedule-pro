@@ -10,6 +10,9 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../middleware/auth.php';
 require_once __DIR__ . '/../models/Seance.php';
 
+// Burkina Faso = UTC+0
+date_default_timezone_set('Africa/Ouagadougou');
+
 $method = $_SERVER['REQUEST_METHOD'];
 $db = Database::getInstance();
 $action = $_GET['action'] ?? null;
@@ -17,11 +20,13 @@ $action = $_GET['action'] ?? null;
 switch ($method) {
     case 'GET':
         if ($action === 'info') {
-            getCreneauInfo($db);   // Prévisualisation token (avant validation)
+            getCreneauInfo($db);       // Prévisualisation token (avant validation)
         } elseif ($action === 'statuts') {
-            getStatutsAujourdhui($db); // Statuts des séances du jour (dashboard)
+            getStatutsAujourdhui($db); // Statuts des séances du jour
+        } elseif ($action === 'alertes') {
+            getAlertesRetard($db);     // Alertes retard pour surveillant/admin
         } else {
-            handleGetQR($db);      // Génération QR-Code
+            handleGetQR($db);          // Génération QR-Code
         }
         break;
     case 'POST':
@@ -67,7 +72,7 @@ function handleGetQR(PDO $db): void {
     $heureDebut = $creneau['heure_debut']; // ex: "08:00:00"
     $dateSeance = date('Y-m-d'); // aujourd'hui
     $debutTimestamp = strtotime("$dateSeance $heureDebut");
-    $expire = date('Y-m-d H:i:s', $debutTimestamp + 15 * 60); // +15 min
+    $expire = date('Y-m-d H:i:s', $debutTimestamp + 15 * 60); // heure_debut + 15 min (fin de fenêtre)
 
     // Enregistrer le token
     $seanceModel->updateQRToken($idCreneau, $token, $expire);
@@ -150,7 +155,7 @@ function handleScanQR(PDO $db): void {
         exit;
     }
 
-    // Vérifier la fenêtre ±15 min autour de l'heure prévue
+    // Vérifier la fenêtre : de 30 min avant jusqu'à 2h après le début
     $now = new DateTime();
     $heureDebutObj = new DateTime(date('Y-m-d') . ' ' . $creneau['heure_debut']);
     $diff = $now->getTimestamp() - $heureDebutObj->getTimestamp(); // secondes depuis heure prévue
@@ -162,12 +167,12 @@ function handleScanQR(PDO $db): void {
         http_response_code(400);
         echo json_encode([
             'success' => false,
-            'message' => "QR-Code pas encore actif. La séance commence dans {$minutesAvant} min."
+            'message' => "QR-Code pas encore actif. La séance commence dans {$minutesAvant} min. (Fenêtre : 15 min avant le début)"
         ]);
         exit;
     }
 
-    // Trop tard : plus de 15 min après le début (QR expiré)
+    // Trop tard : plus de 15 min après le début
     if ($diff > 900) {
         logPointage($db, $idCreneau, $token, 'expire');
         http_response_code(400);
@@ -254,10 +259,10 @@ function handleScanQR(PDO $db): void {
 
 /**
  * Prévisualiser les infos d'une séance depuis son token (avant validation)
- * Requiert une authentification enseignant
+ * Requiert une authentification (tout rôle)
  */
 function getCreneauInfo(PDO $db): void {
-    $user = requireRole(['enseignant']);
+    $user = requireAuth(); // Tout utilisateur authentifié peut voir les infos (pas juste enseignant)
     $token = $_GET['token'] ?? null;
 
     if (!$token) { sendError(400, 'Token requis'); }
@@ -370,24 +375,32 @@ function getStatutsAujourdhui(PDO $db): void {
     $now = time();
     $result = [];
     foreach ($seances as $s) {
-        $heureDebut = strtotime(date('Y-m-d') . ' ' . $s['heure_debut']);
-        $diff = $now - $heureDebut;
+        $today      = date('Y-m-d');
+        $heureDebut = strtotime($today . ' ' . $s['heure_debut']);
+        $heureFin   = strtotime($today . ' ' . $s['heure_fin']);
+        $diff       = $now - $heureDebut;
+        $estTermine = $now >= $heureFin; // la séance est entièrement passée
 
         if ($s['statut_pointage'] === 'valide') {
+            // Pointé à l'heure
             $statut_visuel = 'en_cours';
             $couleur = 'success';
         } elseif ($s['statut_pointage'] === 'retard') {
+            // Pointé en retard
             $statut_visuel = 'retard';
             $couleur = 'warning';
-        } elseif ($diff > 1800) { // >30 min sans pointage
-            $statut_visuel = 'absent';
-            $couleur = 'danger';
-        } elseif ($diff > 0) { // commencé mais pas encore pointé
+        } elseif ($diff < 0) {
+            // Séance pas encore commencée
+            $statut_visuel = 'planifie';
+            $couleur = 'light';
+        } elseif (!$estTermine) {
+            // Séance en cours mais pas encore pointée
             $statut_visuel = 'en_attente';
             $couleur = 'secondary';
         } else {
-            $statut_visuel = 'planifie';
-            $couleur = 'light';
+            // Séance terminée sans aucun pointage → Absent
+            $statut_visuel = 'absent';
+            $couleur = 'danger';
         }
 
         $result[] = array_merge($s, [
@@ -396,6 +409,53 @@ function getStatutsAujourdhui(PDO $db): void {
             'heure_debut'   => substr($s['heure_debut'], 0, 5),
             'heure_fin'     => substr($s['heure_fin'], 0, 5),
         ]);
+    }
+
+    echo json_encode(['success' => true, 'data' => $result]);
+}
+
+/**
+ * Alertes retard du jour pour le surveillant/admin
+ * Retourne les pointages de type 'retard' enregistrés aujourd'hui
+ */
+function getAlertesRetard(PDO $db): void {
+    $user = requireRole(['admin', 'surveillant']);
+
+    $stmt = $db->prepare("
+        SELECT
+            la.horodatage,
+            la.details_json,
+            CONCAT(e.prenom, ' ', e.nom) AS enseignant_nom,
+            m.libelle AS matiere_libelle,
+            cl.libelle AS classe_libelle,
+            c.heure_debut,
+            c.heure_fin
+        FROM logs_activite la
+        JOIN utilisateurs u ON la.id_utilisateur = u.id
+        JOIN enseignants e ON u.id_lien = e.id AND u.role = 'enseignant'
+        JOIN creneaux c ON JSON_UNQUOTE(JSON_EXTRACT(la.details_json, '$.id_creneau')) = c.id
+        JOIN matieres m ON c.id_matiere = m.id
+        JOIN emploi_temps et ON c.id_emploi_temps = et.id
+        JOIN classes cl ON et.id_classe = cl.id
+        WHERE la.action = 'alerte_retard_surveillant'
+          AND DATE(la.horodatage) = CURDATE()
+        ORDER BY la.horodatage DESC
+    ");
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+
+    $result = [];
+    foreach ($rows as $r) {
+        $details = json_decode($r['details_json'], true);
+        $result[] = [
+            'horodatage'     => $r['horodatage'],
+            'enseignant_nom' => $r['enseignant_nom'],
+            'matiere_libelle'=> $r['matiere_libelle'],
+            'classe_libelle' => $r['classe_libelle'],
+            'heure_debut'    => $r['heure_debut'],
+            'heure_fin'      => $r['heure_fin'],
+            'retard_minutes' => $details['retard_minutes'] ?? 0,
+        ];
     }
 
     echo json_encode(['success' => true, 'data' => $result]);

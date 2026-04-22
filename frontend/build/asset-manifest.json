@@ -1,13 +1,16 @@
 {
   "files": {
-    "main.css": "/static/css/main.9fd56454.css",
-    "main.js": "/static/js/main.3c03d96a.js",
+    "main.css": "/static/css/main.2984546d.css",
+    "main.js": "/static/js/main.98d0b717.js",
+    "static/js/355.09fc3f09.chunk.js": "/static/js/355.09fc3f09.chunk.js",
+    "static/media/isge-students.jpeg": "/static/media/isge-students.057e9e9aa6ad084823ae.jpeg",
     "index.html": "/index.html",
-    "main.9fd56454.css.map": "/static/css/main.9fd56454.css.map",
-    "main.3c03d96a.js.map": "/static/js/main.3c03d96a.js.map"
+    "main.2984546d.css.map": "/static/css/main.2984546d.css.map",
+    "main.98d0b717.js.map": "/static/js/main.98d0b717.js.map",
+    "355.09fc3f09.chunk.js.map": "/static/js/355.09fc3f09.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.9fd56454.css",
-    "static/js/main.3c03d96a.js"
+    "static/css/main.2984546d.css",
+    "static/js/main.98d0b717.js"
   ]
 }

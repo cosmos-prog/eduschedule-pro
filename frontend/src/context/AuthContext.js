@@ -9,7 +9,7 @@ const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('eduschedule_token'));
+  const [token, setToken] = useState(sessionStorage.getItem('eduschedule_token'));
   const [loading, setLoading] = useState(true);
 
   // Vérifier le token au chargement
@@ -37,8 +37,8 @@ export const AuthProvider = ({ children }) => {
     const response = await authService.login(email, password);
     if (response.data.success) {
       const { token: newToken, user: userData } = response.data;
-      localStorage.setItem('eduschedule_token', newToken);
-      localStorage.setItem('eduschedule_user', JSON.stringify(userData));
+      sessionStorage.setItem('eduschedule_token', newToken);
+      sessionStorage.setItem('eduschedule_user', JSON.stringify(userData));
       setToken(newToken);
       setUser(userData);
       return { success: true, user: userData };
@@ -49,8 +49,8 @@ export const AuthProvider = ({ children }) => {
   // Déconnexion
   const logout = useCallback(async () => {
     try { await authService.logout(); } catch {} // eslint-disable-line no-empty
-    localStorage.removeItem('eduschedule_token');
-    localStorage.removeItem('eduschedule_user');
+    sessionStorage.removeItem('eduschedule_token');
+    sessionStorage.removeItem('eduschedule_user');
     setToken(null);
     setUser(null);
   }, []);

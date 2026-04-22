@@ -3,9 +3,8 @@
  * Utilisée pour Classes, Matières, Enseignants, Salles
  */
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import { Card, Table, Button, Modal, Form, Spinner, Badge, Row, Col } from 'react-bootstrap';
-import { FaPlus, FaEdit, FaTrash, FaSchool, FaBookOpen, FaChalkboardTeacher, FaDoorOpen } from 'react-icons/fa';
+import { Card, Table, Button, Modal, Form, Spinner, Badge, Row, Col, InputGroup } from 'react-bootstrap';
+import { FaPlus, FaEdit, FaTrash, FaSchool, FaBookOpen, FaChalkboardTeacher, FaDoorOpen, FaSearch } from 'react-icons/fa';
 import { classesService, matieresService, enseignantsService, sallesService } from '../utils/api';
 import { useNotif } from '../context/NotifContext';
 import { formatMontant } from '../utils/helpers';
@@ -50,6 +49,7 @@ const ENTITY_CONFIG = {
     title: 'Enseignants',
     icon: <FaChalkboardTeacher className="me-2" />,
     service: enseignantsService,
+    searchKeys: ['nom', 'prenom', 'email', 'matricule', 'specialite'],
     columns: [
       { key: 'matricule', label: 'Matricule' },
       { key: 'nom', label: 'Nom' },
@@ -60,6 +60,7 @@ const ENTITY_CONFIG = {
       { key: 'taux_horaire', label: 'Taux/h', render: (v) => formatMontant(v) },
     ],
     fields: [
+      { key: 'matricule', label: 'Matricule', type: 'text', required: false, placeholder: 'ENS-001' },
       { key: 'nom', label: 'Nom', type: 'text', required: true },
       { key: 'prenom', label: 'Prénom', type: 'text', required: true },
       { key: 'email', label: 'Email', type: 'email', required: true },
@@ -91,14 +92,16 @@ const ENTITY_CONFIG = {
 const GestionPage = ({ entity }) => {
   const config = ENTITY_CONFIG[entity];
   const notif = useNotif();
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [search, setSearch]     = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [formData, setFormData] = useState({});
 
   useEffect(() => {
     loadItems();
+    setSearch('');
   }, [entity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadItems = async () => {
@@ -157,13 +160,35 @@ const GestionPage = ({ entity }) => {
     return <div className="loading-spinner"><Spinner animation="border" variant="primary" /></div>;
   }
 
+  // Filtrage local
+  const searchKeys = config.searchKeys || config.columns.map(c => c.key);
+  const filtered = search.trim()
+    ? items.filter(item =>
+        searchKeys.some(k =>
+          String(item[k] || '').toLowerCase().includes(search.toLowerCase())
+        )
+      )
+    : items;
+
   return (
     <div>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h4>{config.icon}{config.title} ({items.length})</h4>
-        <Button variant="primary" onClick={() => handleOpen()}>
-          <FaPlus className="me-1" /> Ajouter
-        </Button>
+      <div className="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h4 className="mb-0">{config.icon}{config.title}
+          <small className="text-muted fs-6 ms-2">({filtered.length}{search ? ` / ${items.length}` : ''})</small>
+        </h4>
+        <div className="d-flex gap-2 align-items-center">
+          <InputGroup size="sm" style={{ width: 220 }}>
+            <InputGroup.Text><FaSearch /></InputGroup.Text>
+            <Form.Control
+              placeholder="Rechercher..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </InputGroup>
+          <Button variant="primary" size="sm" onClick={() => handleOpen()}>
+            <FaPlus className="me-1" /> Ajouter
+          </Button>
+        </div>
       </div>
 
       <Card className="stat-card">
@@ -179,7 +204,7 @@ const GestionPage = ({ entity }) => {
               </tr>
             </thead>
             <tbody>
-              {items.map((item, idx) => (
+              {filtered.map((item, idx) => (
                 <tr key={item.id}>
                   <td>{idx + 1}</td>
                   {config.columns.map(col => (
@@ -201,8 +226,10 @@ const GestionPage = ({ entity }) => {
               ))}
             </tbody>
           </Table>
-          {items.length === 0 && (
-            <p className="text-muted text-center py-3">Aucun élément trouvé</p>
+          {filtered.length === 0 && (
+            <p className="text-muted text-center py-3">
+              {search ? 'Aucun résultat pour cette recherche' : 'Aucun élément trouvé'}
+            </p>
           )}
         </Card.Body>
       </Card>

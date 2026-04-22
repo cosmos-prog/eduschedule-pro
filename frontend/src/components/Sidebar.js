@@ -8,7 +8,7 @@ import {
   FaTachometerAlt, FaCalendarAlt, FaQrcode, FaBook,
   FaMoneyBillWave, FaChalkboardTeacher, FaSchool,
   FaBookOpen, FaDoorOpen, FaClipboardList, FaChartBar, FaSignOutAlt,
-  FaUserCircle
+  FaUserCircle, FaCalendarTimes
 } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 
@@ -64,6 +64,7 @@ const Sidebar = ({ isOpen, onClose }) => {
       items.push(
         { to: '/rapports', icon: <FaChartBar />, label: 'Rapports' },
         { to: '/logs', icon: <FaClipboardList />, label: "Journal d'activité" },
+        { to: '/jours-feries', icon: <FaCalendarTimes />, label: 'Jours Fériés' },
       );
     }
 

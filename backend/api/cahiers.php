@@ -32,10 +32,17 @@ switch ($method) {
             }
             echo json_encode(['success' => true, 'data' => $cahier]);
         } else {
-            $idCreneau = isset($_GET['id_creneau']) ? (int) $_GET['id_creneau'] : null;
-            $idClasse = isset($_GET['id_classe']) ? (int) $_GET['id_classe'] : null;
-            $mois = isset($_GET['mois']) ? (int) $_GET['mois'] : null;
-            echo json_encode(['success' => true, 'data' => $model->getAll($idCreneau, $idClasse, $mois)]);
+            $idCreneau    = isset($_GET['id_creneau'])    ? (int) $_GET['id_creneau']    : null;
+            $idClasse     = isset($_GET['id_classe'])     ? (int) $_GET['id_classe']     : null;
+            $mois         = isset($_GET['mois'])          ? (int) $_GET['mois']          : null;
+            // Enseignant : ne voit que ses propres cahiers
+            $idEnseignant = null;
+            if ($user['role'] === 'enseignant') {
+                $idEnseignant = (int) $user['id_lien'];
+            } elseif (isset($_GET['id_enseignant'])) {
+                $idEnseignant = (int) $_GET['id_enseignant'];
+            }
+            echo json_encode(['success' => true, 'data' => $model->getAll($idCreneau, $idClasse, $mois, $idEnseignant)]);
         }
         break;
 
@@ -108,13 +115,40 @@ function handleSigner(CahierTexte $model, int $id): void {
 
     $type = ($user['role'] === 'delegue') ? 'delegue' : 'enseignant';
 
+    // ── Vérification : l'enseignant ne peut signer QUE son propre cahier ──
+    if ($user['role'] === 'enseignant') {
+        $db = Database::getInstance();
+        $stmt = $db->prepare("
+            SELECT c.id_enseignant
+            FROM cahiers_texte ct
+            JOIN creneaux c ON ct.id_creneau = c.id
+            WHERE ct.id = ?
+        ");
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+
+        if (!$row) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'message' => 'Cahier introuvable']);
+            exit;
+        }
+
+        if ((int)$row['id_enseignant'] !== (int)$user['id_lien']) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Accès refusé : ce cahier ne vous appartient pas']);
+            exit;
+        }
+    }
+
     try {
         $model->signer($id, [
-            'type' => $input['type'] ?? $type,
-            'id_utilisateur' => $user['id'],
-            'signature_base64' => $input['signature_base64']
+            'type'             => $type,
+            'id_utilisateur'   => $user['id'],
+            'signature_base64' => $input['signature_base64'],
+            'heure_fin_reelle' => $input['heure_fin_reelle'] ?? null,
         ]);
-        echo json_encode(['success' => true, 'message' => 'Signature enregistrée']);
+        $msg = ($type === 'enseignant') ? 'Séance clôturée et signature enregistrée' : 'Signature enregistrée';
+        echo json_encode(['success' => true, 'message' => $msg]);
     } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(['success' => false, 'message' => 'Erreur : ' . $e->getMessage()]);

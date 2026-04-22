@@ -58,6 +58,35 @@ export const getMondayOfWeek = (date = new Date()) => {
 export const JOURS_SEMAINE = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 
 /**
+ * Retourne le libellé complet d'une semaine (lundi → samedi, 6 jours)
+ * @param {string} lundi - Date du lundi (YYYY-MM-DD)
+ * @returns {string}     - ex: "du 13/04/2026 au 18/04/2026"
+ */
+export const getSemaineLabel = (lundi) => {
+  if (!lundi) return '';
+  const debut = new Date(lundi);
+  const fin   = new Date(lundi);
+  fin.setDate(fin.getDate() + 5); // lundi + 5 jours = samedi
+  const opts = { day: '2-digit', month: '2-digit', year: 'numeric' };
+  return `du ${debut.toLocaleDateString('fr-FR', opts)} au ${fin.toLocaleDateString('fr-FR', opts)}`;
+};
+
+/**
+ * Calculer la date réelle d'un jour de la semaine à partir du lundi
+ * @param {string} lundi - Date du lundi (YYYY-MM-DD)
+ * @param {string} jour  - 'lundi' | 'mardi' | ...
+ * @returns {string}     - ex: "Lun. 13 avr."
+ */
+export const getDateDuJour = (lundi, jour) => {
+  if (!lundi) return jour;
+  const index = ['lundi','mardi','mercredi','jeudi','vendredi','samedi'].indexOf(jour);
+  if (index === -1) return jour;
+  const date = new Date(lundi);
+  date.setDate(date.getDate() + index);
+  return date.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+};
+
+/**
  * Créneaux horaires standards
  */
 export const HEURES_COURS = [

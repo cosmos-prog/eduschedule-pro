@@ -78,15 +78,23 @@ function handleGenerer(Vacation $model): void {
     }
 
     try {
-        $vacationId = $model->generer(
+        $result = $model->generer(
             (int) $input['id_enseignant'],
             (int) $input['mois'],
             (int) $input['annee']
         );
+
+        $nbAlertes = count($result['alertes']);
+        $message = $nbAlertes > 0
+            ? "Fiche générée avec {$nbAlertes} alerte(s) de cohérence à vérifier"
+            : 'Fiche de vacation générée avec succès';
+
         echo json_encode([
-            'success' => true,
-            'id' => $vacationId,
-            'message' => 'Fiche de vacation générée avec succès'
+            'success'    => true,
+            'id'         => $result['id'],
+            'nb_seances' => $result['nb_seances'],
+            'alertes'    => $result['alertes'],
+            'message'    => $message,
         ]);
     } catch (Exception $e) {
         http_response_code(500);
@@ -103,6 +111,26 @@ function handleValider(Vacation $model, int $id, string $roleValidateur): void {
 
     $user = requireRole($allowedRoles[$roleValidateur]);
     $input = json_decode(file_get_contents('php://input'), true);
+
+    // ── Vérification : l'enseignant ne peut signer QUE sa propre fiche ──
+    if ($roleValidateur === 'enseignant') {
+        $db = Database::getInstance();
+        $stmt = $db->prepare("SELECT id_enseignant FROM vacations WHERE id = ?");
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+
+        if (!$row) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'message' => 'Fiche de vacation introuvable']);
+            exit;
+        }
+
+        if ((int)$row['id_enseignant'] !== (int)$user['id_lien']) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Accès refusé : cette fiche ne vous appartient pas']);
+            exit;
+        }
+    }
 
     try {
         $model->valider($id, [

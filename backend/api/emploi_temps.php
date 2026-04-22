@@ -22,7 +22,11 @@ $db = Database::getInstance();
 
 switch ($method) {
     case 'GET':
-        if ($id) {
+        if ($action === 'creneaux_semaine') {
+            getCreneauxSemaine($db);
+        } elseif ($action === 'matiere_enseignant_map') {
+            getMatiereEnseignantMap($db);
+        } elseif ($id) {
             getEmploiTempsDetail($db, $id);
         } else {
             getEmploiTempsList($db);
@@ -32,6 +36,9 @@ switch ($method) {
     case 'POST':
         if ($action === 'add_creneau') {
             addCreneau($db, $id);
+        } elseif ($action === 'dupliquer') {
+            if (!$id) { sendError(400, 'ID de l\'emploi du temps requis'); }
+            dupliquerEmploiTemps($db, $id);
         } else {
             createEmploiTemps($db);
         }
@@ -300,6 +307,206 @@ function logAction(PDO $db, int $userId, string $action, array $details = []): v
         VALUES (?, ?, ?, ?)
     ");
     $stmt->execute([$userId, $action, json_encode($details), $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1']);
+}
+
+/**
+ * Vue créneaux par enseignant ou par salle pour une semaine donnée
+ * GET ?action=creneaux_semaine&semaine=YYYY-MM-DD&id_enseignant=X  (ou id_salle=X)
+ */
+function getCreneauxSemaine(PDO $db): void {
+    $user = requireAuth();
+    $semaine      = $_GET['semaine']       ?? null;
+    $idEnseignant = isset($_GET['id_enseignant']) ? (int) $_GET['id_enseignant'] : null;
+    $idSalle      = isset($_GET['id_salle'])      ? (int) $_GET['id_salle']      : null;
+
+    if (!$semaine || (!$idEnseignant && !$idSalle)) {
+        sendError(400, 'Paramètres requis : semaine + (id_enseignant ou id_salle)');
+    }
+
+    $sql = "
+        SELECT c.id, c.jour, c.heure_debut, c.heure_fin,
+               m.libelle AS matiere_libelle, m.code AS matiere_code,
+               CONCAT(e.prenom, ' ', e.nom) AS enseignant_nom,
+               s.code AS salle_code,
+               cl.libelle AS classe_libelle, cl.code AS classe_code,
+               et.id AS id_emploi_temps, et.semaine_debut, et.statut_publication
+        FROM creneaux c
+        JOIN matieres m      ON c.id_matiere    = m.id
+        JOIN enseignants e   ON c.id_enseignant = e.id
+        JOIN salles s        ON c.id_salle      = s.id
+        JOIN emploi_temps et ON c.id_emploi_temps = et.id
+        JOIN classes cl      ON et.id_classe    = cl.id
+        WHERE et.semaine_debut = ?
+    ";
+    // L'admin voit aussi les brouillons ; les autres rôles ne voient que les ET publiés
+    if (($user['role'] ?? '') !== 'admin') {
+        $sql .= " AND et.statut_publication = 'publie'";
+    }
+    $params = [$semaine];
+
+    if ($idEnseignant) {
+        $sql .= " AND c.id_enseignant = ?";
+        $params[] = $idEnseignant;
+    } else {
+        $sql .= " AND c.id_salle = ?";
+        $params[] = $idSalle;
+    }
+    $sql .= " ORDER BY FIELD(c.jour,'lundi','mardi','mercredi','jeudi','vendredi','samedi'), c.heure_debut";
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    echo json_encode(['success' => true, 'data' => $stmt->fetchAll()]);
+}
+
+/**
+ * Retourne la correspondance matière → enseignant principal,
+ * déduite de l'historique des créneaux (enseignant le plus fréquent par matière).
+ * GET ?action=matiere_enseignant_map
+ */
+function getMatiereEnseignantMap(PDO $db): void {
+    requireAuth();
+    $sql = "
+        SELECT t.id_matiere, t.id_enseignant
+        FROM (
+            SELECT c.id_matiere, c.id_enseignant, COUNT(*) AS nb,
+                   ROW_NUMBER() OVER (PARTITION BY c.id_matiere ORDER BY COUNT(*) DESC, MAX(c.id) DESC) AS rn
+            FROM creneaux c
+            GROUP BY c.id_matiere, c.id_enseignant
+        ) t
+        WHERE t.rn = 1
+    ";
+    try {
+        $stmt = $db->query($sql);
+        $rows = $stmt->fetchAll();
+    } catch (Throwable $e) {
+        // Fallback pour MySQL < 8 (pas de window function) : agrégation manuelle
+        $stmt = $db->query("SELECT id_matiere, id_enseignant, COUNT(*) AS nb FROM creneaux GROUP BY id_matiere, id_enseignant ORDER BY id_matiere, nb DESC");
+        $best = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $m = (int)$r['id_matiere'];
+            if (!isset($best[$m])) {
+                $best[$m] = (int)$r['id_enseignant'];
+            }
+        }
+        $rows = [];
+        foreach ($best as $m => $e) {
+            $rows[] = ['id_matiere' => $m, 'id_enseignant' => $e];
+        }
+    }
+    $map = [];
+    foreach ($rows as $r) {
+        $map[(int)$r['id_matiere']] = (int)$r['id_enseignant'];
+    }
+    echo json_encode(['success' => true, 'data' => $map]);
+}
+
+/**
+ * Dupliquer un emploi du temps vers une semaine cible (défaut : semaine suivante)
+ * POST ?id=X&action=dupliquer   body: { semaine_cible?: "YYYY-MM-DD" }
+ */
+function dupliquerEmploiTemps(PDO $db, int $id): void {
+    $user  = requireRole(['admin']);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+
+    // Source ET
+    $stmt = $db->prepare("SELECT * FROM emploi_temps WHERE id = ?");
+    $stmt->execute([$id]);
+    $source = $stmt->fetch();
+    if (!$source) { sendError(404, 'Emploi du temps source non trouvé'); }
+
+    // Semaine cible
+    $targetSemaine = $input['semaine_cible'] ?? null;
+    if (!$targetSemaine) {
+        $dt = new DateTime($source['semaine_debut']);
+        $dt->modify('+7 days');
+        $targetSemaine = $dt->format('Y-m-d');
+    }
+
+    // Vérifier doublons
+    $chk = $db->prepare("SELECT id FROM emploi_temps WHERE id_classe = ? AND semaine_debut = ?");
+    $chk->execute([$source['id_classe'], $targetSemaine]);
+    if ($chk->fetch()) {
+        sendError(409, 'Un emploi du temps existe déjà pour cette classe cette semaine-là');
+    }
+
+    // Créneaux source
+    $src = $db->prepare("SELECT * FROM creneaux WHERE id_emploi_temps = ?");
+    $src->execute([$id]);
+    $sourceCreneaux = $src->fetchAll();
+
+    // Transaction
+    $db->beginTransaction();
+    try {
+        // Créer le nouvel ET en brouillon
+        $ins = $db->prepare("
+            INSERT INTO emploi_temps (id_classe, semaine_debut, cree_par, statut_publication)
+            VALUES (?, ?, ?, 'brouillon')
+        ");
+        $ins->execute([$source['id_classe'], $targetSemaine, $user['id']]);
+        $newId = (int) $db->lastInsertId();
+
+        // Requête de détection de conflits dans la semaine cible
+        $conflitStmt = $db->prepare("
+            SELECT c.id FROM creneaux c
+            JOIN emploi_temps et ON c.id_emploi_temps = et.id
+            WHERE et.semaine_debut = ?
+              AND c.jour = ?
+              AND c.heure_debut < ?
+              AND c.heure_fin > ?
+              AND (c.id_enseignant = ? OR c.id_salle = ?)
+        ");
+
+        $insCreneauStmt = $db->prepare("
+            INSERT INTO creneaux (id_emploi_temps, jour, heure_debut, heure_fin, id_matiere, id_enseignant, id_salle)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ");
+
+        $nbCopies  = 0;
+        $nbSkipped = 0;
+        $skipped   = [];
+
+        foreach ($sourceCreneaux as $cr) {
+            $conflitStmt->execute([
+                $targetSemaine,
+                $cr['jour'],
+                $cr['heure_fin'],
+                $cr['heure_debut'],
+                $cr['id_enseignant'],
+                $cr['id_salle'],
+            ]);
+            if ($conflitStmt->fetch()) {
+                $nbSkipped++;
+                $skipped[] = ucfirst($cr['jour']) . ' ' . substr($cr['heure_debut'], 0, 5);
+            } else {
+                $insCreneauStmt->execute([
+                    $newId, $cr['jour'], $cr['heure_debut'], $cr['heure_fin'],
+                    $cr['id_matiere'], $cr['id_enseignant'], $cr['id_salle'],
+                ]);
+                $nbCopies++;
+            }
+        }
+
+        logAction($db, $user['id'], 'duplication_emploi_temps', [
+            'source_id' => $id, 'new_id' => $newId,
+            'semaine_cible' => $targetSemaine,
+        ]);
+
+        $db->commit();
+
+        echo json_encode([
+            'success'        => true,
+            'new_id'         => $newId,
+            'semaine_cible'  => $targetSemaine,
+            'nb_creneaux'    => $nbCopies,
+            'nb_skipped'     => $nbSkipped,
+            'skipped'        => $skipped,
+            'message'        => "{$nbCopies} créneau(x) copié(s)"
+                . ($nbSkipped > 0 ? ", {$nbSkipped} ignoré(s) (conflit)" : ''),
+        ]);
+    } catch (Exception $e) {
+        $db->rollBack();
+        sendError(500, 'Erreur lors de la duplication : ' . $e->getMessage());
+    }
 }
 
 function sendError(int $code, string $message): void {

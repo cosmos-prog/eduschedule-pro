@@ -61,22 +61,32 @@ const Navbar = ({ onToggleSidebar }) => {
               <div className="bg-white rounded-circle d-flex align-items-center justify-content-center" style={{ width: 32, height: 32 }}>
                 <FaUser size={14} color="#1a5276" />
               </div>
-              <span className="d-none d-lg-inline">
-                {user?.prenom} {user?.nom}
-              </span>
+              <div className="d-none d-lg-flex flex-column align-items-start" style={{ lineHeight: 1.2 }}>
+                <span style={{ fontSize: '0.85rem' }}>{user?.prenom} {user?.nom}</span>
+                <span style={{ fontSize: '0.7rem', opacity: 0.75, textTransform: 'capitalize' }}>{user?.role}</span>
+              </div>
             </Dropdown.Toggle>
             <Dropdown.Menu>
               <Dropdown.Header>
-                {user?.prenom} {user?.nom}
-                <br />
+                <div>{user?.prenom} {user?.nom}</div>
                 <small className="text-muted text-capitalize">{user?.role}</small>
               </Dropdown.Header>
               <Dropdown.Divider />
-              <Dropdown.Item onClick={logout} className="text-danger">
-                <FaSignOutAlt className="me-2" /> Déconnexion
+              <Dropdown.Item onClick={logout} className="text-danger fw-bold">
+                <FaSignOutAlt className="me-2" /> Se déconnecter
               </Dropdown.Item>
             </Dropdown.Menu>
           </Dropdown>
+
+          {/* Bouton déconnexion rapide visible sur mobile */}
+          <button
+            className="btn btn-sm btn-outline-light d-lg-none ms-1"
+            onClick={logout}
+            title="Se déconnecter"
+            style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+          >
+            <FaSignOutAlt />
+          </button>
         </div>
       </Container>
     </BsNavbar>

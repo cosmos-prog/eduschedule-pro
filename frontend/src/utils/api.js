@@ -19,7 +19,7 @@ const api = axios.create({
 // Intercepteur : ajouter le token JWT à chaque requête
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('eduschedule_token');
+    const token = sessionStorage.getItem('eduschedule_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -36,8 +36,8 @@ api.interceptors.response.use(
       const isLogout = error.config?.url?.includes('action=logout');
       // Token expiré ou invalide -> déconnexion (sauf si c'est déjà la requête de logout)
       if (error.response.status === 401 && !isLogout) {
-        localStorage.removeItem('eduschedule_token');
-        localStorage.removeItem('eduschedule_user');
+        sessionStorage.removeItem('eduschedule_token');
+        sessionStorage.removeItem('eduschedule_user');
         window.location.href = '/login';
         return Promise.resolve(); // ne pas propager l'erreur
       }
@@ -104,6 +104,12 @@ export const emploiTempsService = {
     api.post(`/api/emploi_temps.php?id=${idEmploiTemps}&action=add_creneau`, data),
   deleteCreneau: (idCreneau) =>
     api.delete(`/api/emploi_temps.php?id_creneau=${idCreneau}`),
+  dupliquer: (id, data) =>
+    api.post(`/api/emploi_temps.php?id=${id}&action=dupliquer`, data || {}),
+  getCreneauxSemaine: (params) =>
+    api.get('/api/emploi_temps.php?action=creneaux_semaine', { params }),
+  getMatiereEnseignantMap: () =>
+    api.get('/api/emploi_temps.php?action=matiere_enseignant_map'),
 };
 
 // --- Pointages QR-Code ---
@@ -111,6 +117,7 @@ export const pointagesService = {
   getQR: (idCreneau) => api.get(`/api/pointages.php?id_creneau=${idCreneau}`),
   getInfo: (token) => api.get(`/api/pointages.php?action=info&token=${encodeURIComponent(token)}`),
   getStatutsAujourdhui: () => api.get('/api/pointages.php?action=statuts'),
+  getAlertes: () => api.get('/api/pointages.php?action=alertes'),
   scan: (tokenQr) => api.post('/api/pointages.php', { token_qr: tokenQr }),
 };
 
@@ -143,6 +150,14 @@ export const dashboardService = {
 // --- Logs ---
 export const logsService = {
   getAll: (params) => api.get('/api/logs.php', { params }),
+};
+
+// --- Jours Fériés ---
+export const joursferiesService = {
+  getAll: (annee) => api.get('/api/jours_feries.php', { params: { annee } }),
+  create: (data) => api.post('/api/jours_feries.php', data),
+  update: (id, data) => api.put(`/api/jours_feries.php?id=${id}`, data),
+  delete: (id) => api.delete(`/api/jours_feries.php?id=${id}`),
 };
 
 export default api;

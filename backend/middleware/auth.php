@@ -74,8 +74,19 @@ function verifyJWT(string $token): ?array {
  * @return array Les données de l'utilisateur authentifié
  */
 function requireAuth(): array {
-    $headers = getallheaders();
-    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    // Compatibilité maximale : getallheaders() absent sur certains hébergeurs mutualisés
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    } else {
+        $authHeader = '';
+    }
+    // Fallback via $_SERVER (fonctionne partout, y compris InfinityFree)
+    if (empty($authHeader)) {
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION']
+                      ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
+                      ?? '';
+    }
 
     if (empty($authHeader) || !preg_match('/Bearer\s+(.+)/', $authHeader, $matches)) {
         http_response_code(401);

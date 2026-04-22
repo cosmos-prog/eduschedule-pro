@@ -23,6 +23,7 @@ import VacationsPage from './pages/VacationsPage';
 import GestionPage from './pages/GestionPage';
 import RapportsPage from './pages/RapportsPage';
 import LogsPage from './pages/LogsPage';
+import JoursferiesPage from './pages/JoursferiesPage';
 
 const App = () => {
   const { loading, isAuthenticated, getDashboardPath } = useAuth();
@@ -161,6 +162,16 @@ const App = () => {
           element={
             <PrivateRoute roles={['admin']}>
               <LogsPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Jours Fériés */}
+        <Route
+          path="/jours-feries"
+          element={
+            <PrivateRoute roles={['admin']}>
+              <JoursferiesPage />
             </PrivateRoute>
           }
         />

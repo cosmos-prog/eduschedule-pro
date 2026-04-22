@@ -16,20 +16,27 @@ class CahierTexte {
     /**
      * Obtenir les cahiers de texte avec filtres
      */
-    public function getAll(?int $idCreneau = null, ?int $idClasse = null, ?int $mois = null): array {
+    public function getAll(?int $idCreneau = null, ?int $idClasse = null, ?int $mois = null, ?int $idEnseignant = null): array {
         $sql = "
             SELECT ct.*, c.jour, c.heure_debut, c.heure_fin,
+                   c.id_enseignant,
                    m.libelle AS matiere_libelle,
                    CONCAT(e.prenom, ' ', e.nom) AS enseignant_nom,
                    cl.libelle AS classe_libelle,
-                   CONCAT(u.prenom, ' ', u.nom) AS delegue_nom
+                   cl.code AS classe_code,
+                   s.code AS salle_code,
+                   CONCAT(u.prenom, ' ', u.nom) AS delegue_nom,
+                   et.semaine_debut,
+                   p.heure_pointage_reelle AS heure_debut_reelle
             FROM cahiers_texte ct
             JOIN creneaux c ON ct.id_creneau = c.id
             JOIN matieres m ON c.id_matiere = m.id
             JOIN enseignants e ON c.id_enseignant = e.id
+            JOIN salles s ON c.id_salle = s.id
             JOIN emploi_temps et ON c.id_emploi_temps = et.id
             JOIN classes cl ON et.id_classe = cl.id
             LEFT JOIN utilisateurs u ON ct.id_delegue = u.id
+            LEFT JOIN pointages p ON p.id_creneau = c.id AND p.statut IN ('valide','retard')
             WHERE 1=1
         ";
         $params = [];
@@ -46,8 +53,12 @@ class CahierTexte {
             $sql .= " AND MONTH(et.semaine_debut) = ?";
             $params[] = $mois;
         }
+        if ($idEnseignant) {
+            $sql .= " AND c.id_enseignant = ?";
+            $params[] = $idEnseignant;
+        }
 
-        $sql .= " ORDER BY ct.date_creation DESC";
+        $sql .= " ORDER BY et.semaine_debut DESC, FIELD(c.jour,'lundi','mardi','mercredi','jeudi','vendredi','samedi'), c.heure_debut";
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchAll();
@@ -64,7 +75,8 @@ class CahierTexte {
                    cl.libelle AS classe_libelle, cl.code AS classe_code,
                    s.code AS salle_code,
                    CONCAT(u.prenom, ' ', u.nom) AS delegue_nom,
-                   et.semaine_debut
+                   et.semaine_debut,
+                   p.heure_pointage_reelle AS heure_debut_reelle
             FROM cahiers_texte ct
             JOIN creneaux c ON ct.id_creneau = c.id
             JOIN matieres m ON c.id_matiere = m.id
@@ -73,6 +85,7 @@ class CahierTexte {
             JOIN emploi_temps et ON c.id_emploi_temps = et.id
             JOIN classes cl ON et.id_classe = cl.id
             LEFT JOIN utilisateurs u ON ct.id_delegue = u.id
+            LEFT JOIN pointages p ON p.id_creneau = c.id AND p.statut IN ('valide','retard')
             WHERE ct.id = ?
         ");
         $stmt->execute([$id]);
@@ -178,10 +191,20 @@ class CahierTexte {
                 $data['signature_base64']
             ]);
 
-            // Mettre à jour le statut du cahier
-            $newStatut = ($data['type'] === 'delegue') ? 'signe_delegue' : 'cloture';
-            $stmtUpdate = $this->db->prepare("UPDATE cahiers_texte SET statut = ? WHERE id = ?");
-            $stmtUpdate->execute([$newStatut, $id]);
+            if ($data['type'] === 'delegue') {
+                // Délégué signe → signe_delegue (en attente de l'enseignant)
+                $stmtUpdate = $this->db->prepare("UPDATE cahiers_texte SET statut = 'signe_delegue' WHERE id = ?");
+                $stmtUpdate->execute([$id]);
+            } else {
+                // Enseignant signe → cloture directe (fiche verrouillée, aucune modification sans admin)
+                $heureFin = !empty($data['heure_fin_reelle']) ? $data['heure_fin_reelle'] : date('H:i:s');
+                $stmtUpdate = $this->db->prepare("
+                    UPDATE cahiers_texte
+                    SET statut = 'cloture', heure_fin_reelle = ?
+                    WHERE id = ?
+                ");
+                $stmtUpdate->execute([$heureFin, $id]);
+            }
 
             $this->db->commit();
             return true;
