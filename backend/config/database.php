@@ -17,6 +17,9 @@ if (file_exists($envFile)) {
     }
 }
 
+// Fuseau horaire PHP — doit correspondre à l'heure locale (Ouagadougou = UTC+0)
+date_default_timezone_set('Africa/Ouagadougou');
+
 // Configuration par défaut
 define('DB_HOST', $_ENV['DB_HOST'] ?? 'localhost');
 define('DB_NAME', $_ENV['DB_NAME'] ?? 'eduschedule_pro');
@@ -42,6 +45,9 @@ class Database {
                     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                     PDO::ATTR_EMULATE_PREPARES => false,
                 ]);
+                // Forcer le fuseau MySQL de la session = UTC+0 (= Ouagadougou)
+                // Corrige CURRENT_TIMESTAMP / NOW() pour tous les logs et timestamps
+                self::$instance->exec("SET time_zone = '+00:00'");
             } catch (PDOException $e) {
                 http_response_code(500);
                 echo json_encode([
