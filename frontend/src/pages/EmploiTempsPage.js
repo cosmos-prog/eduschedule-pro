@@ -5,7 +5,7 @@
  * Admin : créer, ajouter/supprimer créneaux, publier/dépublier, dupliquer
  * Vue journalière : filtrer sur un seul jour
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Row, Col, Card, Form, Button, Badge, Spinner, Modal, Alert, ButtonGroup
 } from 'react-bootstrap';
@@ -16,7 +16,7 @@ import {
 } from 'react-icons/fa';
 import {
   emploiTempsService, classesService, matieresService,
-  enseignantsService, sallesService
+  enseignantsService, sallesService, joursferiesService
 } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useNotif } from '../context/NotifContext';
@@ -51,6 +51,9 @@ const EmploiTempsPage = () => {
   const [selectedSalle, setSelectedSalle]         = useState('');
   const [selectedSemaine, setSelectedSemaine]     = useState(getMondayOfWeek());
   const [filteredJour, setFilteredJour]           = useState(null); // null = toute la semaine
+
+  // --- Jours fériés : { 'YYYY-MM-DD': 'Libellé' } ---
+  const [joursFeries, setJoursFeries] = useState({});
 
   // --- Emploi du temps (mode classe) ---
   const [emploiTemps, setEmploiTemps] = useState(null);
@@ -106,6 +109,19 @@ const EmploiTempsPage = () => {
           const mapRes = await emploiTempsService.getMatiereEnseignantMap();
           setMatEnsMap(mapRes.data?.data || {});
         } catch { /* silencieux, non bloquant */ }
+        // Charger les jours fériés (années courante + suivante pour couvrir les semaines à cheval)
+        try {
+          const annee = new Date().getFullYear();
+          const [fRes1, fRes2] = await Promise.all([
+            joursferiesService.getAll(annee),
+            joursferiesService.getAll(annee + 1),
+          ]);
+          const map = {};
+          [...(fRes1.data?.data || []), ...(fRes2.data?.data || [])].forEach(f => {
+            map[f.date_ferie] = f.libelle;
+          });
+          setJoursFeries(map);
+        } catch { /* silencieux */ }
       } catch {
         notif.error('Erreur chargement des données');
       }
@@ -176,9 +192,34 @@ const EmploiTempsPage = () => {
     return () => clearInterval(interval);
   }, [loadCreneaux]);
 
+  /* ─── Date ISO d'un jour de la semaine (ex: 'lundi' → '2026-05-11') ─── */
+  const getISODate = (jour) => {
+    const index = ['lundi','mardi','mercredi','jeudi','vendredi','samedi'].indexOf(jour);
+    if (index === -1 || !selectedSemaine) return null;
+    const d = new Date(selectedSemaine + 'T00:00:00');
+    d.setDate(d.getDate() + index);
+    return d.toISOString().slice(0, 10);
+  };
+
   /* ─── Grille : trouver le créneau d'un jour/heure ─── */
   const getCreneau = (jour, heureDebut) =>
     creneaux.find(c => c.jour === jour && formatTime(c.heure_debut) === heureDebut);
+
+  /* ─── Lignes horaires dynamiques : standards + créneaux réels ─── */
+  const heuresAffichees = useMemo(() => {
+    // Base : créneaux standards
+    const map = {};
+    HEURES_COURS.forEach(h => { map[h.debut] = h.fin; });
+    // Ajouter les créneaux réels non-standards
+    creneaux.forEach(c => {
+      const debut = formatTime(c.heure_debut);
+      const fin   = formatTime(c.heure_fin);
+      if (!map[debut]) map[debut] = fin;
+    });
+    return Object.entries(map)
+      .map(([debut, fin]) => ({ debut, fin }))
+      .sort((a, b) => a.debut.localeCompare(b.debut));
+  }, [creneaux]);
 
   /* ─── Jours affichés (filtrage vue journalière) ─── */
   const joursAffiches = filteredJour
@@ -258,8 +299,9 @@ const EmploiTempsPage = () => {
       await emploiTempsService.deleteCreneau(idCreneau);
       notif.success('Créneau supprimé');
       loadCreneaux();
-    } catch {
-      notif.error('Erreur lors de la suppression');
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Erreur lors de la suppression';
+      notif.error(msg);
     }
   };
 
@@ -521,25 +563,60 @@ const EmploiTempsPage = () => {
           {/* En-têtes */}
           <div className="day-header" style={{ backgroundColor: '#34495e' }}>Horaire</div>
           {joursAffiches.map(jour => {
-            const dateStr = getDateDuJour(selectedSemaine, jour);
+            const dateStr   = getDateDuJour(selectedSemaine, jour);
+            const isoDate   = getISODate(jour);
+            const ferieLib  = isoDate ? joursFeries[isoDate] : null;
             const [jourCourt, ...reste] = dateStr.split(' ');
             return (
-              <div key={jour} className="day-header" style={{ flexDirection: 'column', gap: 0 }}>
+              <div
+                key={jour}
+                className="day-header"
+                style={{ flexDirection: 'column', gap: 0, backgroundColor: ferieLib ? '#7f1d1d' : undefined }}
+              >
                 <span style={{ textTransform: 'capitalize', fontWeight: 'bold' }}>{jourCourt}</span>
                 <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>{reste.join(' ')}</span>
+                {ferieLib && (
+                  <span style={{
+                    fontSize: '0.6rem', marginTop: 3, backgroundColor: '#fca5a5',
+                    color: '#7f1d1d', borderRadius: 4, padding: '1px 5px', fontWeight: 600,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%'
+                  }}>
+                    🎌 Férié
+                  </span>
+                )}
               </div>
             );
           })}
 
           {/* Lignes horaires */}
-          {HEURES_COURS.map(heure => (
+          {heuresAffichees.map(heure => (
             <React.Fragment key={heure.debut}>
               <div className="time-slot">
                 {heure.debut}<br />-<br />{heure.fin}
               </div>
               {joursAffiches.map(jour => {
-                const creneau = getCreneau(jour, heure.debut);
-                const isEditable = isAdmin && viewMode === 'classe' && emploiTemps && emploiTemps.statut_publication === 'brouillon';
+                const isoDate  = getISODate(jour);
+                const ferieLib = isoDate ? joursFeries[isoDate] : null;
+                const creneau  = getCreneau(jour, heure.debut);
+                const isEditable = isAdmin && viewMode === 'classe' && emploiTemps
+                  && emploiTemps.statut_publication === 'brouillon' && !ferieLib;
+
+                if (ferieLib) {
+                  // Cellule jour férié : fond rouge clair, pas de clic
+                  return (
+                    <div
+                      key={`${jour}-${heure.debut}`}
+                      className="slot"
+                      style={{ backgroundColor: '#fef2f2', cursor: 'not-allowed', borderColor: '#fca5a5' }}
+                    >
+                      <div style={{ textAlign: 'center', color: '#b91c1c', fontSize: '0.68rem', padding: '4px 2px', lineHeight: 1.3 }}>
+                        <div>🎌 Férié</div>
+                        <div style={{ fontWeight: 600, marginTop: 2, wordBreak: 'break-word' }}>{ferieLib}</div>
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <div
                     key={`${jour}-${heure.debut}`}
@@ -645,7 +722,15 @@ const EmploiTempsPage = () => {
               <Form.Group>
                 <Form.Label>Jour</Form.Label>
                 <Form.Select value={creneauForm.jour} onChange={e => setCreneauForm(f => ({ ...f, jour: e.target.value }))}>
-                  {JOURS_OPTIONS.map(j => <option key={j} value={j}>{j.charAt(0).toUpperCase() + j.slice(1)}</option>)}
+                  {JOURS_OPTIONS.map(j => {
+                    const iso = getISODate(j);
+                    const fLib = iso ? joursFeries[iso] : null;
+                    return (
+                      <option key={j} value={j} disabled={!!fLib}>
+                        {j.charAt(0).toUpperCase() + j.slice(1)}{fLib ? ` 🎌 Férié (${fLib})` : ''}
+                      </option>
+                    );
+                  })}
                 </Form.Select>
               </Form.Group>
             </Col>

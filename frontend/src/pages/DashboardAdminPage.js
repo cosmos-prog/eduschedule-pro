@@ -62,7 +62,14 @@ const DashboardAdminPage = () => {
 
   return (
     <div>
-      <h4 className="mb-4">Tableau de bord — Administration</h4>
+      <div className="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+        <h4 className="mb-0">Tableau de bord — Administration</h4>
+        {stats?.semaine_affichee && (
+          <span className={`badge ${stats.est_semaine_courante ? 'bg-success' : 'bg-warning text-dark'} fs-6`}>
+            {stats.est_semaine_courante ? '📅 Semaine en cours' : `📅 Données : semaine du ${new Date(stats.semaine_affichee).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}`}
+          </span>
+        )}
+      </div>
 
       {/* ── Bandeau alerte temps réel ─────────────────────────────── */}
       {hasAlertes && (
