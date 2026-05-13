@@ -179,25 +179,62 @@ class Vacation {
                 }
 
                 // ── Contrôle 2 : pointage QR-Code présent ────────────────────
-                if (empty($seance['pointage_statut'])) {
-                    $messages[] = "Aucun pointage QR-Code enregistré";
+                $aPointage = !empty($seance['pointage_statut']);
+                if (!$aPointage) {
+                    $messages[] = "Aucun pointage QR-Code — séance non payable";
                 }
 
                 // ── Calcul de la durée réelle ────────────────────────────────
                 $dureePlanifiee = (float) $seance['duree_planifiee'];
 
-                if (!empty($seance['heure_fin_reelle']) && !empty($seance['heure_debut_reelle'])) {
-                    // Durée basée sur pointage réel → fin réelle
-                    $debut = strtotime($seance['heure_debut_reelle']);
-                    $fin   = strtotime($seance['heure_fin_reelle']);
+                // Normalise une valeur heure en "HH:MM:SS" quel que soit le format
+                // DATETIME "2026-04-06 08:20:00" → "08:20:00"
+                // TIME     "09:55:00"            → "09:55:00"
+                $normaliserHeure = function(?string $h): ?string {
+                    if (empty($h)) return null;
+                    // DATETIME : prendre les 8 caractères après le premier espace
+                    if (strlen($h) > 8 && strpos($h, ' ') !== false) {
+                        return substr($h, strpos($h, ' ') + 1, 8);
+                    }
+                    return substr($h, 0, 8);
+                };
+
+                $heureDebutStr = $normaliserHeure($seance['heure_debut_reelle']);
+                $heureFinStr   = $normaliserHeure($seance['heure_fin_reelle']);
+
+                // Utiliser une date de référence fixe pour comparer uniquement les heures
+                $ref          = '2000-01-01 ';
+                $heureDebPlan = substr($seance['heure_debut'], 0, 8); // heure planifiée début
+                $heureFinPlan = substr($seance['heure_fin'],   0, 8); // heure planifiée fin
+
+                // Validation de l'heure de début réelle :
+                // Si elle est AVANT l'heure planifiée de plus d'1h, c'est une donnée corrompue
+                // (ex: pointage stocké à 00:20 au lieu de 10:20) → utiliser le début planifié
+                if (!empty($heureDebutStr)) {
+                    $tsDebutReel = strtotime($ref . $heureDebutStr);
+                    $tsDebutPlan = strtotime($ref . $heureDebPlan);
+                    if ($tsDebutReel < $tsDebutPlan - 3600) {
+                        // Heure corrompue → fallback sur heure planifiée, ajouter alerte
+                        $messages[]    = "Heure de début anormale ($heureDebutStr) — heure planifiée utilisée ($heureDebPlan)";
+                        $heureDebutStr = $heureDebPlan;
+                    }
+                }
+
+                if (!$aPointage) {
+                    // ── PAS de pointage QR → séance non payable ─────────────
+                    $duree = 0.0;
+                } elseif (!empty($heureFinStr) && !empty($heureDebutStr)) {
+                    $debut = strtotime($ref . $heureDebutStr);
+                    $fin   = strtotime($ref . $heureFinStr);
+                    if ($fin < $debut) $fin += 86400;
                     $duree = max(0, ($fin - $debut) / 3600.0);
-                } elseif (!empty($seance['heure_fin_reelle'])) {
-                    // Fin réelle seulement → début planifié
-                    $debut = strtotime($seance['heure_debut']);
-                    $fin   = strtotime($seance['heure_fin_reelle']);
+                } elseif (!empty($heureFinStr)) {
+                    $debut = strtotime($ref . $heureDebPlan);
+                    $fin   = strtotime($ref . $heureFinStr);
+                    if ($fin < $debut) $fin += 86400;
                     $duree = max(0, ($fin - $debut) / 3600.0);
                 } else {
-                    // Pas de données réelles : durée planifiée
+                    // Pointé (arrivée enregistrée) mais pas de fin → durée planifiée
                     $duree = $dureePlanifiee;
                 }
                 $duree = round($duree, 2);
@@ -226,13 +263,12 @@ class Vacation {
 
                 $lignes[] = [
                     'id_creneau'         => $seance['creneau_id'],
-                    'heure_debut_reelle' => !empty($seance['heure_debut_reelle'])
-                        ? substr($seance['heure_debut_reelle'], 0, 8) : null,
-                    'heure_fin_reelle'   => !empty($seance['heure_fin_reelle'])
-                        ? substr($seance['heure_fin_reelle'], 0, 8) : null,
+                    'heure_debut_reelle' => $heureDebutStr,
+                    'heure_fin_reelle'   => $heureFinStr,
                     'duree_heures'       => $duree,
                     'taux'               => $tauxHoraire,
                     'montant'            => $montant,
+                    'non_payable'        => !$aPointage ? 1 : 0,
                     'alerte'             => $aAlerte ? 1 : 0,
                     'alerte_message'     => $aAlerte ? implode(' ; ', $messages) : null,
                 ];

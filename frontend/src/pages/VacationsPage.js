@@ -139,13 +139,17 @@ const RecuVacation = ({ data }) => {
             </tr>
           </thead>
           <tbody>
-            {data.lignes?.length > 0 ? data.lignes.map((l, i) => (
-              <tr key={i} style={{
-                backgroundColor: l.alerte ? '#fef9e7' : (i % 2 === 0 ? '#fff' : '#f8f9fa')
-              }}>
+            {data.lignes?.length > 0 ? data.lignes.map((l, i) => {
+              const nonPayable = !!l.non_payable;
+              const rowBg = nonPayable ? '#fff5f5' : (l.alerte ? '#fef9e7' : (i % 2 === 0 ? '#fff' : '#f8f9fa'));
+              return (
+              <tr key={i} style={{ backgroundColor: rowBg }}>
                 <td style={{ padding: '5px 8px', border: '1px solid #ddd', textAlign: 'center' }}>
                   {i + 1}
-                  {l.alerte ? <span style={{ color: '#e67e22', marginLeft: '4px' }}>⚠</span> : null}
+                  {nonPayable
+                    ? <span style={{ color: '#dc2626', marginLeft: '4px' }} title="Séance non pointée — non payable">✗</span>
+                    : l.alerte ? <span style={{ color: '#e67e22', marginLeft: '4px' }}>⚠</span> : null
+                  }
                 </td>
                 <td style={{ padding: '5px 8px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>
                   {l.semaine_debut ? getDateDuJour(l.semaine_debut, l.jour) : <span className="text-capitalize">{l.jour}</span>}
@@ -155,23 +159,31 @@ const RecuVacation = ({ data }) => {
                 <td style={{ padding: '5px 8px', border: '1px solid #ddd', whiteSpace: 'nowrap', color: '#555' }}>
                   {formatTime(l.heure_debut)}–{formatTime(l.heure_fin)}
                 </td>
-                <td style={{ padding: '5px 8px', border: '1px solid #ddd', whiteSpace: 'nowrap', color: '#27ae60', fontWeight: 'bold' }}>
+                <td style={{ padding: '5px 8px', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>
                   {l.heure_debut_reelle
-                    ? `${l.heure_debut_reelle.substring(0, 5)}–${l.heure_fin_reelle ? l.heure_fin_reelle.substring(0, 5) : '?'}`
-                    : <span style={{ color: '#aaa' }}>—</span>
+                    ? <span style={{ color: '#27ae60', fontWeight: 'bold' }}>
+                        {l.heure_debut_reelle.substring(0, 5)}–{l.heure_fin_reelle ? l.heure_fin_reelle.substring(0, 5) : '?'}
+                      </span>
+                    : <span style={{ color: '#dc2626', fontWeight: 'bold' }}>Non pointé</span>
                   }
                 </td>
-                <td style={{ padding: '5px 8px', border: '1px solid #ddd', textAlign: 'center' }}>
-                  {parseFloat(l.duree_heures).toFixed(1)}h
+                <td style={{ padding: '5px 8px', border: '1px solid #ddd', textAlign: 'center',
+                  color: nonPayable ? '#dc2626' : 'inherit', fontWeight: nonPayable ? 'bold' : 'normal' }}>
+                  {nonPayable ? '0h' : `${parseFloat(l.duree_heures).toFixed(1)}h`}
                 </td>
                 <td style={{ padding: '5px 8px', border: '1px solid #ddd', textAlign: 'right' }}>
-                  {formatMontant(l.taux)}
+                  {nonPayable ? <span style={{ color: '#aaa' }}>—</span> : formatMontant(l.taux)}
                 </td>
-                <td style={{ padding: '5px 8px', border: '1px solid #ddd', textAlign: 'right', fontWeight: 'bold' }}>
-                  {formatMontant(l.montant)}
+                <td style={{ padding: '5px 8px', border: '1px solid #ddd', textAlign: 'right', fontWeight: 'bold',
+                  color: nonPayable ? '#dc2626' : 'inherit' }}>
+                  {nonPayable
+                    ? <span>0 F CFA <span style={{ fontSize: '0.7rem', fontWeight: 'normal', color: '#dc2626' }}>non payable</span></span>
+                    : formatMontant(l.montant)
+                  }
                 </td>
               </tr>
-            )) : (
+              );
+            }) : (
               <tr>
                 <td colSpan={9} style={{ padding: '10px', textAlign: 'center', color: '#777' }}>
                   Aucune séance — vérifiez que les cahiers de texte sont clôturés et les pointages enregistrés
