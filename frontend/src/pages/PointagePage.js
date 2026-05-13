@@ -259,7 +259,16 @@ const PointagePage = () => {
   // ── Arrêter le scanner caméra ──
   const stopCamera = useCallback(async () => {
     if (qrCodeRef.current) {
-      await qrCodeRef.current.stop().catch(() => {});
+      try {
+        // Vérifier que le scanner est bien en cours avant de l'arrêter
+        const state = qrCodeRef.current.getState?.();
+        // State 2 = SCANNING, State 3 = PAUSED
+        if (!state || state === 2 || state === 3) {
+          await qrCodeRef.current.stop();
+        }
+      } catch {
+        // Ignorer les erreurs d'arrêt (scanner pas encore démarré)
+      }
       qrCodeRef.current = null;
     }
     setScanning(false);

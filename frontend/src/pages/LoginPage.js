@@ -15,6 +15,7 @@ const DEMO_ACCOUNTS = [
   { role: 'Délégué',     email: 'delegue.l1@isge.edu',    password: 'password', color: '#10b981' },
   { role: 'Surveillant', email: 'surveillant@isge.edu',   password: 'password', color: '#f59e0b' },
   { role: 'Comptable',   email: 'comptable@isge.edu',     password: 'password', color: '#ec4899' },
+  { role: 'Étudiant',   email: 'etudiant@isge.edu',      password: 'password', color: '#f97316' },
 ];
 
 const S = {
