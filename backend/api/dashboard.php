@@ -56,38 +56,55 @@ function getAdminStats(PDO $db): array {
                'thursday'=>'jeudi','friday'=>'vendredi','saturday'=>'samedi'];
     $jourActuel = $jourFr[strtolower(date('l'))] ?? 'lundi';
 
+    // Semaine courante (lundi de cette semaine)
+    $semaineActuelle = date('Y-m-d', strtotime('monday this week'));
+
+    // Semaine active : cette semaine si elle a des données publiées,
+    // sinon la semaine publiée la plus récente (pour ne pas afficher vide)
+    $stmtSem = $db->prepare("
+        SELECT semaine_debut FROM emploi_temps
+        WHERE statut_publication = 'publie'
+        ORDER BY ABS(DATEDIFF(semaine_debut, ?)) ASC
+        LIMIT 1
+    ");
+    $stmtSem->execute([$semaineActuelle]);
+    $semaineActive = $stmtSem->fetchColumn() ?: $semaineActuelle;
+    $stats['semaine_affichee'] = $semaineActive;
+    $stats['est_semaine_courante'] = ($semaineActive === $semaineActuelle);
+
     // ── 1. Séances du jour ──────────────────────────────────────────
     $stmt = $db->prepare("
         SELECT COUNT(*) AS total FROM creneaux c
         JOIN emploi_temps et ON c.id_emploi_temps = et.id
         WHERE c.jour = ? AND et.statut_publication = 'publie'
-          AND et.semaine_debut = DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+          AND et.semaine_debut = ?
     ");
-    $stmt->execute([$jourActuel]);
+    $stmt->execute([$jourActuel, $semaineActive]);
     $stats['seances_jour'] = (int) $stmt->fetch()['total'];
 
-    // ── 2. Taux de présence (semaine courante) ──────────────────────
+    // ── 2. Taux de présence (toutes séances passées, semaines publiées) ──
+    // On ne limite pas à la semaine active pour éviter d'afficher 0
+    // quand la semaine courante vient juste d'être publiée sans pointages
     $stmt2 = $db->query("
         SELECT COUNT(DISTINCT c.id) AS total,
                COUNT(DISTINCT p.id_creneau) AS pointes
         FROM creneaux c
         JOIN emploi_temps et ON c.id_emploi_temps = et.id
         LEFT JOIN pointages p ON p.id_creneau = c.id AND p.statut IN ('valide','retard')
-        WHERE et.semaine_debut = DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
-          AND et.statut_publication = 'publie'
+        WHERE et.statut_publication = 'publie'
     ");
     $presence = $stmt2->fetch();
     $stats['taux_presence'] = $presence['total'] > 0
         ? round(($presence['pointes'] / $presence['total']) * 100, 1) : 0;
 
-    // ── 3. Retards cette semaine ────────────────────────────────────
-    $stmt3 = $db->query("
+    // ── 3. Retards (semaine active) ────────────────────────────────
+    $stmt3 = $db->prepare("
         SELECT COUNT(*) AS total FROM pointages p
         JOIN creneaux c ON p.id_creneau = c.id
         JOIN emploi_temps et ON c.id_emploi_temps = et.id
-        WHERE p.statut = 'retard'
-          AND et.semaine_debut = DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+        WHERE p.statut = 'retard' AND et.semaine_debut = ?
     ");
+    $stmt3->execute([$semaineActive]);
     $stats['retards_semaine'] = (int) $stmt3->fetch()['total'];
 
     // ── 4. Séances non pointées (passées aujourd'hui) ───────────────
@@ -96,11 +113,11 @@ function getAdminStats(PDO $db): array {
         JOIN emploi_temps et ON c.id_emploi_temps = et.id
         LEFT JOIN pointages p ON p.id_creneau = c.id AND p.statut IN ('valide','retard')
         WHERE c.jour = ? AND et.statut_publication = 'publie'
-          AND et.semaine_debut = DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+          AND et.semaine_debut = ?
           AND c.heure_fin <= CURTIME()
           AND p.id IS NULL
     ");
-    $stmt4->execute([$jourActuel]);
+    $stmt4->execute([$jourActuel, $semaineActive]);
     $stats['seances_non_pointees'] = (int) $stmt4->fetch()['total'];
 
     // ── 5. Cahiers non signés (en attente) ─────────────────────────
@@ -108,7 +125,7 @@ function getAdminStats(PDO $db): array {
     $stats['cahiers_non_signes'] = (int) $stmt5->fetch()['total'];
 
     // ── 6. Heures planifiées vs réalisées par classe (semaine) ──────
-    $stmt6 = $db->query("
+    $stmt6 = $db->prepare("
         SELECT cl.libelle AS classe,
                ROUND(SUM(TIME_TO_SEC(c.heure_fin) - TIME_TO_SEC(c.heure_debut)) / 3600, 1) AS heures_planifiees,
                ROUND(SUM(CASE WHEN p.statut IN ('valide','retard')
@@ -118,10 +135,11 @@ function getAdminStats(PDO $db): array {
         JOIN emploi_temps et ON et.id_classe = cl.id
         JOIN creneaux c ON c.id_emploi_temps = et.id
         LEFT JOIN pointages p ON p.id_creneau = c.id
-        WHERE et.semaine_debut = DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+        WHERE et.semaine_debut = ?
         GROUP BY cl.id, cl.libelle
         ORDER BY cl.libelle
     ");
+    $stmt6->execute([$semaineActive]);
     $stats['heures_par_classe'] = $stmt6->fetchAll();
 
     // ── 7. Avancement des programmes par matière × classe ──────────
@@ -157,12 +175,12 @@ function getAdminStats(PDO $db): array {
         JOIN classes cl    ON et.id_classe = cl.id
         LEFT JOIN pointages p ON p.id_creneau = c.id AND p.statut IN ('valide','retard')
         WHERE c.jour = ? AND et.statut_publication = 'publie'
-          AND et.semaine_debut = DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+          AND et.semaine_debut = ?
           AND c.heure_fin <= CURTIME()
           AND p.id IS NULL
         ORDER BY c.heure_debut
     ");
-    $stmt8->execute([$jourActuel]);
+    $stmt8->execute([$jourActuel, $semaineActive]);
     $stats['alertes_non_pointees'] = $stmt8->fetchAll();
 
     // ── 9. Cahiers en attente avec détails ─────────────────────────
