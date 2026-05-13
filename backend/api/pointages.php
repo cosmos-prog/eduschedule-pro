@@ -155,30 +155,20 @@ function handleScanQR(PDO $db): void {
         exit;
     }
 
-    // Vérifier la fenêtre : de 30 min avant jusqu'à 2h après le début
+    // Le QR-Code n'expire pas côté horaire — le serveur enregistre l'heure réelle et décide du statut
+    // Calcul du diff uniquement pour déterminer le statut (valide / retard)
     $now = new DateTime();
     $heureDebutObj = new DateTime(date('Y-m-d') . ' ' . $creneau['heure_debut']);
+    $heureFinObj   = new DateTime(date('Y-m-d') . ' ' . $creneau['heure_fin']);
     $diff = $now->getTimestamp() - $heureDebutObj->getTimestamp(); // secondes depuis heure prévue
 
-    // Trop tôt : plus de 15 min avant le début
-    if ($diff < -900) {
-        logPointage($db, $idCreneau, $token, 'invalide');
+    // Bloquer uniquement si scan trop tôt (plus de 30 min avant la séance)
+    if ($diff < -1800) {
         $minutesAvant = abs(round($diff / 60));
         http_response_code(400);
         echo json_encode([
             'success' => false,
-            'message' => "QR-Code pas encore actif. La séance commence dans {$minutesAvant} min. (Fenêtre : 15 min avant le début)"
-        ]);
-        exit;
-    }
-
-    // Trop tard : plus de 15 min après le début
-    if ($diff > 900) {
-        logPointage($db, $idCreneau, $token, 'expire');
-        http_response_code(400);
-        echo json_encode([
-            'success' => false,
-            'message' => 'QR-Code expiré. La fenêtre de pointage (±15 min) est dépassée.'
+            'message' => "QR-Code pas encore actif. La séance commence dans {$minutesAvant} min."
         ]);
         exit;
     }
@@ -191,11 +181,10 @@ function handleScanQR(PDO $db): void {
         exit;
     }
 
-    // Déterminer le statut : retard si > 0 sec après l'heure prévue
+    // Statut : valide (à l'heure), retard (après l'heure prévue)
     $statut = ($diff > 0) ? 'retard' : 'valide';
 
     // Enregistrer le pointage — PHP date() respecte date_default_timezone_set('Africa/Ouagadougou')
-    // MySQL NOW() utilise le fuseau du serveur MySQL (UTC sur InfinityFree) → heure incorrecte
     $heurePointage = date('Y-m-d H:i:s');
     $stmtPointage = $db->prepare("
         INSERT INTO pointages (id_creneau, heure_pointage_reelle, ip_source, token_utilise, statut)
@@ -212,7 +201,7 @@ function handleScanQR(PDO $db): void {
     // Invalider le token (usage unique)
     $db->prepare("UPDATE creneaux SET qr_token = NULL WHERE id = ?")->execute([$idCreneau]);
 
-    // Alerte au surveillant si retard > 30 min (normalement QR expiré, mais garde-fou)
+    // Alerte au surveillant si retard > 30 min
     if ($diff > 1800) {
         $minutesRetard = round($diff / 60);
         $stmtAlerte = $db->prepare("
@@ -306,14 +295,12 @@ function getCreneauInfo(PDO $db): void {
     $heureDebut = strtotime(date('Y-m-d') . ' ' . $creneau['heure_debut']);
     $diff = $now - $heureDebut; // secondes depuis heure prévue
 
+    // Le statut est calculé par le serveur — pas de fenêtre d'expiration côté token
     $statut_fenetre = 'valide';
     $message_fenetre = 'Pointage possible maintenant';
-    if ($diff < -900) {
+    if ($diff < -1800) {
         $statut_fenetre = 'trop_tot';
         $message_fenetre = 'Séance pas encore commencée (' . abs(round($diff / 60)) . ' min restantes)';
-    } elseif ($diff > 900) {
-        $statut_fenetre = 'expire';
-        $message_fenetre = 'Fenêtre de pointage expirée';
     } elseif ($diff > 0) {
         $statut_fenetre = 'retard';
         $message_fenetre = 'Retard de ' . round($diff / 60) . ' min';
@@ -352,7 +339,18 @@ function getStatutsAujourdhui(PDO $db): void {
         'thursday'=>'jeudi','friday'=>'vendredi','saturday'=>'samedi','sunday'=>'dimanche'
     ];
     $jourFr = $jours[$aujourdhui] ?? $aujourdhui;
-    $semaine = date('Y-m-d', strtotime('monday this week'));
+
+    // Utiliser la semaine publiée la plus proche (même logique que le dashboard admin)
+    // pour éviter "Aucune séance" quand l'ET publié n'est pas la semaine courante
+    $semaineActuelle = date('Y-m-d', strtotime('monday this week'));
+    $stmtSem = $db->prepare("
+        SELECT semaine_debut FROM emploi_temps
+        WHERE statut_publication = 'publie'
+        ORDER BY ABS(DATEDIFF(semaine_debut, ?)) ASC
+        LIMIT 1
+    ");
+    $stmtSem->execute([$semaineActuelle]);
+    $semaine = $stmtSem->fetchColumn() ?: $semaineActuelle;
 
     $stmt = $db->prepare("
         SELECT c.id, c.jour, c.heure_debut, c.heure_fin,
@@ -419,45 +417,46 @@ function getStatutsAujourdhui(PDO $db): void {
 
 /**
  * Alertes retard du jour pour le surveillant/admin
- * Retourne les pointages de type 'retard' enregistrés aujourd'hui
+ * Retourne TOUS les pointages de statut 'retard' enregistrés aujourd'hui
+ * (pas uniquement les retards > 30 min loggés dans logs_activite)
  */
 function getAlertesRetard(PDO $db): void {
     $user = requireRole(['admin', 'surveillant']);
 
     $stmt = $db->prepare("
         SELECT
-            la.horodatage,
-            la.details_json,
+            p.heure_pointage_reelle AS horodatage,
             CONCAT(e.prenom, ' ', e.nom) AS enseignant_nom,
             m.libelle AS matiere_libelle,
             cl.libelle AS classe_libelle,
             c.heure_debut,
-            c.heure_fin
-        FROM logs_activite la
-        JOIN utilisateurs u ON la.id_utilisateur = u.id
-        JOIN enseignants e ON u.id_lien = e.id AND u.role = 'enseignant'
-        JOIN creneaux c ON JSON_UNQUOTE(JSON_EXTRACT(la.details_json, '$.id_creneau')) = c.id
-        JOIN matieres m ON c.id_matiere = m.id
+            c.heure_fin,
+            ROUND(
+                (TIME_TO_SEC(TIME(p.heure_pointage_reelle)) - TIME_TO_SEC(c.heure_debut)) / 60
+            , 0) AS retard_minutes
+        FROM pointages p
+        JOIN creneaux c      ON p.id_creneau = c.id
+        JOIN enseignants e   ON c.id_enseignant = e.id
+        JOIN matieres m      ON c.id_matiere = m.id
         JOIN emploi_temps et ON c.id_emploi_temps = et.id
-        JOIN classes cl ON et.id_classe = cl.id
-        WHERE la.action = 'alerte_retard_surveillant'
-          AND DATE(la.horodatage) = CURDATE()
-        ORDER BY la.horodatage DESC
+        JOIN classes cl      ON et.id_classe = cl.id
+        WHERE p.statut = 'retard'
+          AND DATE(p.heure_pointage_reelle) = CURDATE()
+        ORDER BY p.heure_pointage_reelle DESC
     ");
     $stmt->execute();
     $rows = $stmt->fetchAll();
 
     $result = [];
     foreach ($rows as $r) {
-        $details = json_decode($r['details_json'], true);
         $result[] = [
-            'horodatage'     => $r['horodatage'],
-            'enseignant_nom' => $r['enseignant_nom'],
-            'matiere_libelle'=> $r['matiere_libelle'],
-            'classe_libelle' => $r['classe_libelle'],
-            'heure_debut'    => $r['heure_debut'],
-            'heure_fin'      => $r['heure_fin'],
-            'retard_minutes' => $details['retard_minutes'] ?? 0,
+            'horodatage'      => $r['horodatage'],
+            'enseignant_nom'  => $r['enseignant_nom'],
+            'matiere_libelle' => $r['matiere_libelle'],
+            'classe_libelle'  => $r['classe_libelle'],
+            'heure_debut'     => $r['heure_debut'],
+            'heure_fin'       => $r['heure_fin'],
+            'retard_minutes'  => max(0, (int) $r['retard_minutes']),
         ];
     }
 
