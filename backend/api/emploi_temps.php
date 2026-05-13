@@ -56,11 +56,12 @@ switch ($method) {
         break;
 
     case 'DELETE':
-        if (!$id) { sendError(400, 'ID requis'); }
         if ($idCreneau) {
             deleteCreneau($db, $idCreneau);
-        } else {
+        } elseif ($id) {
             deleteEmploiTemps($db, $id);
+        } else {
+            sendError(400, 'ID requis');
         }
         break;
 
@@ -257,6 +258,30 @@ function addCreneau(PDO $db, int $idEmploiTemps): void {
 
     $input['id_emploi_temps'] = $idEmploiTemps;
 
+    // ── Vérification jour férié ──────────────────────────────────────────
+    $stmtET = $db->prepare("SELECT semaine_debut FROM emploi_temps WHERE id = ?");
+    $stmtET->execute([$idEmploiTemps]);
+    $semaineDeb = $stmtET->fetchColumn();
+    if ($semaineDeb) {
+        $jourOffset = [
+            'lundi' => 0, 'mardi' => 1, 'mercredi' => 2,
+            'jeudi' => 3, 'vendredi' => 4, 'samedi' => 5, 'dimanche' => 6,
+        ];
+        $offset = $jourOffset[strtolower($input['jour'])] ?? 0;
+        $dt = new DateTime($semaineDeb);
+        $dt->modify("+{$offset} days");
+        $dateCreneau = $dt->format('Y-m-d');
+
+        $stmtF = $db->prepare("SELECT libelle FROM jours_feries WHERE date_ferie = ?");
+        $stmtF->execute([$dateCreneau]);
+        $ferie = $stmtF->fetch();
+        if ($ferie) {
+            $dateAff = $dt->format('d/m/Y');
+            sendError(409, "Impossible de programmer un cours le {$dateAff} : jour férié ({$ferie['libelle']})");
+        }
+    }
+    // ────────────────────────────────────────────────────────────────────
+
     $seanceModel = new Seance();
     $conflits = $seanceModel->detectConflits($input);
     if (!empty($conflits)) {
@@ -275,9 +300,39 @@ function addCreneau(PDO $db, int $idEmploiTemps): void {
 
 /**
  * Supprimer un créneau individuel
+ * Bloqué si le créneau a des pointages ou des cahiers de texte associés
  */
 function deleteCreneau(PDO $db, int $idCreneau): void {
     $user = requireRole(['admin']);
+
+    // Vérifier s'il existe des pointages liés à ce créneau
+    $stmtP = $db->prepare("SELECT COUNT(*) FROM pointages WHERE id_creneau = ?");
+    $stmtP->execute([$idCreneau]);
+    $nbPointages = (int) $stmtP->fetchColumn();
+
+    if ($nbPointages > 0) {
+        http_response_code(409);
+        echo json_encode([
+            'success' => false,
+            'message' => "Impossible de supprimer ce créneau : il possède {$nbPointages} pointage(s) enregistré(s)."
+        ]);
+        return;
+    }
+
+    // Vérifier s'il existe des cahiers de texte liés à ce créneau
+    $stmtC = $db->prepare("SELECT COUNT(*) FROM cahiers_texte WHERE id_creneau = ?");
+    $stmtC->execute([$idCreneau]);
+    $nbCahiers = (int) $stmtC->fetchColumn();
+
+    if ($nbCahiers > 0) {
+        http_response_code(409);
+        echo json_encode([
+            'success' => false,
+            'message' => "Impossible de supprimer ce créneau : il possède {$nbCahiers} cahier(s) de texte associé(s)."
+        ]);
+        return;
+    }
+
     $seanceModel = new Seance();
     $seanceModel->delete($idCreneau);
     logAction($db, $user['id'], 'suppression_creneau', ['id_creneau' => $idCreneau]);
